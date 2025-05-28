@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Keamanan ESP32-CAM</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+            background-color: #f0f0f0;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: inline-block;
+            max-width: 90%;
+            margin-top: 20px;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            padding: 10px;
+            width: 80%;
+            max-width: 300px;
+            margin-right: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.1em;
+            margin: 10px 5px;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .error-message {
+            color: #dc3545;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        .success-message {
+            color: #28a745;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        #pirStatus {
+            font-weight: bold;
+            transition: color 0.3s ease;
+        }
+        .status-aman {
+            color: #28a745;
+        }
+        .status-deteksi {
+            color: #dc3545;
+        }
+        .status-disabled {
+            color: #6c757d;
+        }
+        #cameraFeed {
+            max-width: 100%;
+            height: auto;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+            display: none; /* Awalnya sembunyikan stream kamera */
+        }
+    </style>
+</head>
+<body>
+    <div id="url-input-screen" class="container">
+        <h1>Sistem Keamanan ESP32-CAM</h1>
+        <div class="input-group">
+            <label for="ngrokUrlInput">Masukkan URL Ngrok ESP32-CAM Anda:</label><br>
+            <input type="text" id="ngrokUrlInput" placeholder="Contoh: https://abcdef12345.ngrok.io">
+            <button onclick="saveUrlAndCheck()">Konfirmasi URL</button>
+            <p id="urlErrorMessage" class="error-message"></p>
+            <p id="urlSuccessMessage" class="success-message"></p>
+        </div>
+    </div>
+
+    <div id="main-dashboard" class="container" style="display:none;">
+        <h1>Sistem Keamanan ESP32-CAM</h1>
+        
+        <p>Status PIR: <span id='pirStatus'>Memuat...</span></p>
+        <div class="control-buttons">
+            <button onclick='pirEnable()'>Aktifkan PIR</button>
+            <button onclick='pirDisable()'>Nonaktifkan PIR</button>
+        </div>
+
+        <hr style="margin: 20px 0;">
+
+        <h3>Check Esp32-cam?</h3>
+        <button onclick='showCameraStream()'>Tampilkan Kamera</button>
+        <img id='cameraFeed' src='' alt="Live Stream Kamera"> 
+
+        <hr style="margin: 20px 0;">
+
+        <h3>Menyalakan buzzer?</h3>
+        <div class="control-buttons">
+            <button onclick='buzzerOn()'>Nyalakan Buzzer</button>
+            <button onclick='buzzerOff()'>Matikan Buzzer</button>
+        </div>
+    </div>
+
+    <script>
+        let esp32BaseUrl = ''; // Variabel untuk menyimpan URL Ngrok yang dikonfirmasi
+
+        // Fungsi untuk memeriksa koneksi ke URL Ngrok
+        async function checkNgrokConnection(url) {
+            const errorMessageElement = document.getElementById('urlErrorMessage');
+            const successMessageElement = document.getElementById('urlSuccessMessage');
+            errorMessageElement.innerText = '';
+            successMessageElement.innerText = 'Memeriksa koneksi...';
+
+            try {
+                // Coba akses endpoint sederhana (misal root atau pir_status)
+                const response = await fetch(`${url}/`);
+                if (response.ok) {
+                    esp32BaseUrl = url; // Simpan URL jika berhasil
+                    localStorage.setItem('esp32NgrokUrl', url); // Simpan di local storage
+                    successMessageElement.innerText = 'Koneksi berhasil! Memuat dashboard...';
+                    setTimeout(() => {
+                        document.getElementById('url-input-screen').style.display = 'none';
+                        document.getElementById('main-dashboard').style.display = 'block';
+                        updatePirStatus(); // Mulai update status PIR
+                    }, 1000); // Tunda sebentar sebelum menampilkan dashboard
+                    return true;
+                } else {
+                    errorMessageElement.innerText = `Koneksi gagal: Status HTTP ${response.status}. Pastikan URL Ngrok benar dan aktif.`;
+                    return false;
+                }
+            } catch (error) {
+                errorMessageElement.innerText = 'Koneksi gagal: Tidak dapat menjangkau URL tersebut. Periksa URL Ngrok atau koneksi Anda.';
+                console.error('Error checking Ngrok connection:', error);
+                return false;
+            } finally {
+                successMessageElement.innerText = ''; // Hapus pesan sukses setelah proses selesai
+            }
+        }
+
+        // Fungsi untuk menyimpan URL dan memulai pengecekan
+        function saveUrlAndCheck() {
+            const inputUrl = document.getElementById('ngrokUrlInput').value.trim();
+            // Validasi sederhana untuk memastikan URL dimulai dengan http(s)://
+            if (inputUrl && (inputUrl.startsWith('http://') || inputUrl.startsWith('https://'))) {
+                checkNgrokConnection(inputUrl);
+            } else {
+                document.getElementById('urlErrorMessage').innerText = 'Harap masukkan URL Ngrok yang valid (diawali http:// atau https://).';
+            }
+        }
+
+        // Fungsi untuk menampilkan stream kamera
+        function showCameraStream() {
+            const cameraFeed = document.getElementById('cameraFeed');
+            if (esp32BaseUrl) {
+                cameraFeed.src = `${esp32BaseUrl}/stream`;
+                cameraFeed.style.display = 'block'; // Tampilkan gambar
+            } else {
+                alert('URL Ngrok belum diatur atau koneksi gagal.');
+            }
+        }
+
+        // Fungsi-fungsi kontrol PIR dan Buzzer
+        function updatePirStatus() {
+            if (!esp32BaseUrl) return; // Jangan fetch jika URL belum diatur
+            fetch(`${esp32BaseUrl}/pir_status`)
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return response.text();
+                })
+                .then(data => {
+                    const pirStatusElement = document.getElementById('pirStatus');
+                    pirStatusElement.innerText = data;
+                    pirStatusElement.classList.remove('status-aman', 'status-deteksi', 'status-disabled');
+                    if (data === 'Gerakan Terdeteksi!') pirStatusElement.classList.add('status-deteksi');
+                    else if (data === 'PIR Dinonaktifkan') pirStatusElement.classList.add('status-disabled');
+                    else pirStatusElement.classList.add('status-aman');
+                })
+                .catch(error => {
+                    console.error('Error fetching PIR status:', error);
+                    document.getElementById('pirStatus').innerText = 'Error: Tidak dapat memuat status.';
+                    document.getElementById('pirStatus').classList.remove('status-aman', 'status-deteksi', 'status-disabled');
+                });
+        }
+
+        function buzzerOn() {
+            if (!esp32BaseUrl) return;
+            fetch(`${esp32BaseUrl}/buzzer_on`)
+                .then(response => { if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.text(); })
+                .then(data => console.log(data))
+                .catch(error => console.error('Error turning buzzer ON:', error));
+        }
+
+        function buzzerOff() {
+            if (!esp32BaseUrl) return;
+            fetch(`${esp32BaseUrl}/buzzer_off`)
+                .then(response => { if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.text(); })
+                .then(data => console.log(data))
+                .catch(error => console.error('Error turning buzzer OFF:', error));
+        }
+
+        function pirEnable() {
+            if (!esp32BaseUrl) return;
+            fetch(`${esp32BaseUrl}/pir_enable`)
+                .then(response => { if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.text(); })
+                .then(data => console.log(data))
+                .catch(error => console.error('Error enabling PIR:', error));
+        }
+
+        function pirDisable() {
+            if (!esp32BaseUrl) return;
+            fetch(`${esp32BaseUrl}/pir_disable`)
+                .then(response => { if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.text(); })
+                .then(data => console.log(data))
+                .catch(error => console.error('Error disabling PIR:', error));
+        }
+
+        // --- Inisialisasi Saat Halaman Dimuat ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedUrl = localStorage.getItem('esp32NgrokUrl');
+            if (savedUrl) {
+                document.getElementById('ngrokUrlInput').value = savedUrl;
+                document.getElementById('urlSuccessMessage').innerText = `URL terakhir: ${savedUrl}. Mencoba terhubung...`;
+                checkNgrokConnection(savedUrl);
+            }
+        });
+
+        // Set interval untuk update PIR hanya setelah dashboard utama terlihat
+        setInterval(() => {
+            if (document.getElementById('main-dashboard').style.display !== 'none') {
+                updatePirStatus();
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
